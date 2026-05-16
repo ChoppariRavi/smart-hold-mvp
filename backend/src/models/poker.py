@@ -20,3 +20,8 @@ class GameState(BaseModel):
     current_hand: List[CardModel]
     remaining_deck: List[CardModel]
     is_complete: bool = False
+
+class DealResponse(BaseModel):
+    game_id: str
+    hand: List[CardModel]
+    coach_suggestion: List[int] # <-- Add this!

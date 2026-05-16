@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional, Tuple
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from src.models.poker import EvaluationRequest, EvaluationResponse, CardModel
@@ -7,6 +7,8 @@ from src.core.constants import PAYTABLE
 from src.core.deck import Deck
 import uuid
 from typing import Dict
+from src.core.strategy import get_all_hold_combinations
+from src.core.simulator import get_suggested_holds
 
 # In-memory store: { game_id: {"hand": [], "deck": []} }
 game_sessions: Dict[str, dict] = {}
@@ -34,9 +36,16 @@ async def evaluate_poker_hand(request: EvaluationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class SuggestionDetail(BaseModel):
+    indices: Tuple[int, ...]
+    held: List[CardModel]
+    discarded: List[CardModel]
 class DealResponse(BaseModel):
     game_id: str
     hand: list[CardModel]
+    coach_suggestion: list[int]  # <-- Add this line
+    message: str
 
 @router.get("/deal", response_model=DealResponse)
 async def deal_new_hand(seed: Optional[int] = None):
@@ -45,15 +54,20 @@ async def deal_new_hand(seed: Optional[int] = None):
     game_id = str(uuid.uuid4())
     
     # Save the state! 
-    # deck.cards now contains the remaining 47 cards
     game_sessions[game_id] = {
         "current_hand": hand,
         "deck": deck.cards 
     }
+
+    # 1. Directly call your rule-based strategy helper
+    # (Make sure to import get_suggested_holds at the top of the file!)
+    suggestion_indices = get_suggested_holds(hand)
     
     return {
         "game_id": game_id,
-        "hand": hand
+        "hand": hand,
+        "coach_suggestion": suggestion_indices, # Always a clean, precise List[int]
+        "message": "Hand dealt! Use the /draw endpoint to play your hand."
     }
 
 @router.post("/draw/{game_id}")

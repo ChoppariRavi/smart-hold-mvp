@@ -11,3 +11,10 @@ dependencies = [
     "pydantic>=2.13.3",
     "uvicorn>=0.46.0",
 ]
+[project.scripts]
+dev = "uvicorn src.main:app --reload"
+
+[dependency-groups]
+dev = [
+    "playwright>=1.59.0",
+]

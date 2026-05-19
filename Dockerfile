@@ -16,15 +16,23 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Set up the Hugging Face sandbox user space (UID 1000 required by HF)
 RUN useradd -m -u 1000 appuser
+
+# Copy python configuration blueprints before switching users
+COPY backend/pyproject.toml backend/uv.lock* ./
+
+# Change ownership of the workspace directory so appuser owns it completely
+RUN chown -R appuser:appuser /app
+
 USER appuser
 ENV PATH="/home/appuser/.local/bin:${PATH}"
 
-# Install Python backend dependencies
-COPY backend/pyproject.toml backend/uv.lock* ./
-RUN uv pip install --system -r pyproject.toml
+# --- OPTIMIZED PIP INSTALLATION STEP ---
+# 1. Added --user flag so packages go to the user home folder instead of global root paths
+# 2. Added --link-mode=copy flag to suppress the filesystem hardlink warning perfectly
+RUN uv pip install --user --link-mode=copy -r pyproject.toml
 
 # Copy backend application source
-COPY backend/src ./src
+COPY --chown=appuser:appuser backend/src ./src
 
 # Pull the static compiled frontend bundle from Stage 1 into the execution root
 COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out

@@ -20,8 +20,7 @@ RUN useradd -m -u 1000 appuser
 # Copy python configuration blueprints while we are still root
 COPY backend/pyproject.toml backend/uv.lock* ./
 
-# --- RUN THIS WHILE ROOT (No permission issues) ---
-# Installs packages globally, tells uv to expect system mode, and bypasses hardlink warnings
+# Run this while root (No permission issues)
 RUN uv pip install --system --link-mode=copy -r pyproject.toml
 
 # Switch down to the sandbox profile required by Hugging Face
@@ -37,5 +36,6 @@ COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out
 # Hugging Face Spaces listen natively on port 7860
 EXPOSE 7860
 
-# Launch the unified FastAPI production server
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# --- ADJUSTED RUN COMMAND ---
+# Added --app-dir . to tell Uvicorn to anchor its module mapping engine from the execution root folder
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860", "--app-dir", "."]

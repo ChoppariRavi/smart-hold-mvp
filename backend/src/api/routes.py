@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from src.core.coach import generate_coach_critique
 from src.models.poker import EvaluationRequest, EvaluationResponse, CardModel
 from src.core.evaluator import evaluate_hand
 from src.core.constants import PAYTABLE
@@ -95,13 +96,19 @@ class DrawRequest(BaseModel):
 
 @router.post("/draw")
 async def draw_cards(request: DrawRequest):
+    game_id = request.game_id
     session = game_sessions.get(request.game_id)
+
     if not session:
         raise HTTPException(status_code=404, detail="Game session not found")
-    
-    current_hand = session["current_hand"]
+        
     remaining_deck = session["deck"]
-    
+    session = game_sessions[game_id]
+    current_hand = session["current_hand"]
+
+    # 1. Run the optimal choice math BEFORE executing the swap
+    optimal_holds = get_suggested_holds(current_hand)
+
     # Replace cards that were NOT held
     for i in range(5):
         if i not in request.hold_indices:
@@ -113,11 +120,24 @@ async def draw_cards(request: DrawRequest):
     suits = [c.suit for c in current_hand]
     final_rank = evaluate_hand(ranks, suits)
     
-    # Clean up the session (Game is over)
+   
+
+    # 2. Fire up the AI engine to generate live commentary
+    coach_commentary = generate_coach_critique(
+        initial_hand=current_hand,
+        optimal_holds=optimal_holds,
+        player_holds=request.hold_indices,
+        final_hand=current_hand,
+        hand_rank=final_rank
+    )
+    print(f"Coach Commentary: {coach_commentary}") # Debug log to see the AI's response in the console
+
+     # Clean up the session (Game is over)
     del game_sessions[request.game_id]
     
     return {
         "final_hand": current_hand,
         "rank": final_rank,
-        "payout": PAYTABLE.get(final_rank, 0)
+        "payout": PAYTABLE.get(final_rank, 0),
+        "coach_commentary": coach_commentary # <-- Add this field to what you return!
     }

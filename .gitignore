@@ -1,1 +1,3 @@
 /node_modules
+/backend/.env
+/backend/src/core/coach.py

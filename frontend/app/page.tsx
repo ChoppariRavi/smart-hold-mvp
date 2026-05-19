@@ -17,6 +17,7 @@ export default function Home() {
   const [coachSuggestion, setCoachSuggestion] = useState<number[]>([]);
   const [gameState, setGameState] = useState<'IDLE' | 'DEALT' | 'FINISHED'>('IDLE');
   const [result, setResult] = useState<{ rank: string; payout: number } | null>(null);
+  const [coachCommentary, setCoachCommentary] = useState<string | null>(null); // <-- Added for OpenAI commentary
   const [error, setError] = useState<string | null>(null);
 
   const getSuitSymbolAndColor = (suit: string) => {
@@ -32,6 +33,7 @@ export default function Home() {
   const handleDeal = async () => {
     try {
       setError(null);
+      setCoachCommentary(null); // Clear previous round commentary
       const response = await fetch(`${API_BASE_URL}/deal`);
       if (!response.ok) throw new Error('Backend server is offline!');
       const data = await response.json();
@@ -58,6 +60,7 @@ export default function Home() {
     if (!gameId) return;
     try {
       setError(null);
+      setCoachCommentary(null); // Clear previous round commentary
       const response = await fetch(`${API_BASE_URL}/draw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -68,6 +71,7 @@ export default function Home() {
       
       setHand(data.final_hand);
       setResult({ rank: data.rank, payout: data.payout });
+      setCoachCommentary(data.coach_commentary); // <-- Set OpenAI feedback here!
       setGameState('FINISHED');
     } catch (err: any) {
       setError(err.message || 'Failed to draw');
@@ -141,6 +145,24 @@ export default function Home() {
               <p className="text-xs text-amber-200/60 mt-0.5">
                 The analyzer recommends holding indices: <span className="font-mono font-bold text-amber-300">[{coachSuggestion.join(', ')}]</span>. 
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* --- NEW: Dynamic AI Coach Commentary Display --- */}
+        {gameState === 'FINISHED' && coachCommentary && (
+          <div className="mb-6 p-5 bg-gradient-to-r from-slate-950 to-slate-900 border-l-4 border-teal-400 rounded-r-xl shadow-lg relative overflow-hidden animate-fadeIn">
+            <div className="flex items-start gap-4">
+              <div className="flex flex-col items-center bg-slate-900 border border-slate-800 p-2 rounded-xl min-w-[60px]">
+                <span className="text-2xl mb-1">👑</span>
+                <span className="text-[10px] uppercase font-black tracking-wider text-teal-400">AI COACH</span>
+              </div>
+              <div className="flex-1">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Post-Game Analysis</h4>
+                <p className="text-sm font-medium text-slate-100 italic leading-relaxed">
+                  "{coachCommentary}"
+                </p>
+              </div>
             </div>
           </div>
         )}

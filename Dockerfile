@@ -25,7 +25,10 @@ RUN uv pip install --system --link-mode=copy -r pyproject.toml
 
 # Switch down to the sandbox profile required by Hugging Face
 USER appuser
+
+# --- CRITICAL FIX: Explicitly add /app to the PYTHONPATH ---
 ENV PATH="/home/appuser/.local/bin:${PATH}"
+ENV PYTHONPATH="/app:${PYTHONPATH}"
 
 # Copy backend application source with correct user permissions
 COPY --chown=appuser:appuser backend/src ./src
@@ -37,5 +40,5 @@ COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out
 EXPOSE 7860
 
 # --- ADJUSTED RUN COMMAND ---
-# Added --app-dir . to tell Uvicorn to anchor its module mapping engine from the execution root folder
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860", "--app-dir", "."]
+# We invoke it using the explicit module path "src.main:app" and anchor the directory context to /app
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "7860"]

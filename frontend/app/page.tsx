@@ -8,7 +8,11 @@ interface Card {
   value: string;
 }
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+// Automatically checks if the app is running in production or development mode
+const API_BASE_URL = 
+  process.env.NODE_ENV === 'production'
+    ? ''                  // Production (Hugging Face): Use relative routing
+    : 'http://127.0.0.1:8000'; // Development (Local Machine): Direct to FastAPI port
 
 export default function Home() {
   const [gameId, setGameId] = useState<string | null>(null);
@@ -160,7 +164,7 @@ export default function Home() {
               <div className="flex-1">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Post-Game Analysis</h4>
                 <p className="text-sm font-medium text-slate-100 italic leading-relaxed">
-                  "{coachCommentary}"
+                  {coachCommentary}
                 </p>
               </div>
             </div>

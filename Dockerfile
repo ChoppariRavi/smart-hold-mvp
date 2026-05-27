@@ -41,4 +41,4 @@ COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out
 EXPOSE 7860
 
 # Launch uvicorn exactly the same way you do locally!
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]

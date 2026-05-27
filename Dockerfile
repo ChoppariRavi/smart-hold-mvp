@@ -30,9 +30,11 @@ USER appuser
 ENV PATH="/home/appuser/.local/bin:${PATH}"
 ENV PYTHONPATH="/app/backend:${PYTHONPATH}"
 
-# --- FIX 1: Copy everything inside backend directly into /app/backend ---
-# This ensures main.py, src/, and any other modules are placed exactly in the working root
+# Copy everything inside backend directly into /app/backend
 COPY --chown=appuser:appuser backend/ ./
+
+# --- FIX: Create the missing 'public' directory so FastAPI doesn't crash ---
+RUN mkdir -p public
 
 # Pull the static compiled frontend bundle from Stage 1 into the execution root (/app/backend/out)
 COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out
@@ -40,5 +42,5 @@ COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out
 # Hugging Face Spaces listen natively on port 7860
 EXPOSE 7860
 
-# --- FIX 2: Launch main:app right from the current directory ---
+# Launch uvicorn right from the current directory
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]

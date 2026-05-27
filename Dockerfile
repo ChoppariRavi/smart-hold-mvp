@@ -8,7 +8,8 @@ RUN npm run build
 
 # === STAGE 2: Build the FastAPI Backend & Assemble Showcase ===
 FROM python:3.12-slim
-WORKDIR /app
+# Anchor the container base path inside the backend boundary space
+WORKDIR /app/backend
 
 # Install system dependencies and copy uv package installer
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -26,19 +27,18 @@ RUN uv pip install --system --link-mode=copy -r pyproject.toml
 # Switch down to the sandbox profile required by Hugging Face
 USER appuser
 
-# --- CRITICAL FIX: Explicitly add /app to the PYTHONPATH ---
+# Setup our absolute execution path pointers cleanly
 ENV PATH="/home/appuser/.local/bin:${PATH}"
-ENV PYTHONPATH="/app:${PYTHONPATH}"
+ENV PYTHONPATH="/app/backend:${PYTHONPATH}"
 
-# Copy backend application source with correct user permissions
+# Copy backend application source directly into /app/backend/src
 COPY --chown=appuser:appuser backend/src ./src
 
-# Pull the static compiled frontend bundle from Stage 1 into the execution root
+# Pull the static compiled frontend bundle from Stage 1 into the execution root (/app/backend/out)
 COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out
 
 # Hugging Face Spaces listen natively on port 7860
 EXPOSE 7860
 
-# --- ADJUSTED RUN COMMAND ---
-# We invoke it using the explicit module path "src.main:app" and anchor the directory context to /app
+# Launch uvicorn exactly the same way you do locally!
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "7860"]

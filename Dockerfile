@@ -23,6 +23,9 @@ COPY backend/pyproject.toml backend/uv.lock* ./
 # Run this while root (No permission issues)
 RUN uv pip install --system --link-mode=copy -r pyproject.toml
 
+# --- FIX: Create the 'public' folder while we are still ROOT ---
+RUN mkdir -p public && chown -R appuser:appuser public
+
 # Switch down to the sandbox profile required by Hugging Face
 USER appuser
 
@@ -32,9 +35,6 @@ ENV PYTHONPATH="/app/backend:${PYTHONPATH}"
 
 # Copy everything inside backend directly into /app/backend
 COPY --chown=appuser:appuser backend/ ./
-
-# --- FIX: Create the missing 'public' directory so FastAPI doesn't crash ---
-RUN mkdir -p public
 
 # Pull the static compiled frontend bundle from Stage 1 into the execution root (/app/backend/out)
 COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/out ./out

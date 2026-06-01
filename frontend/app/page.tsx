@@ -1,18 +1,11 @@
-"use client"; // <--- CRITICAL: Tells Next.js to allow hooks like useState
+"use client";
 
 import { useState } from 'react';
 
-// 1. Types inline so we don't worry about pathing issues right now
 interface Card {
   suit: 'H' | 'D' | 'C' | 'S';
   value: string;
 }
-
-// Automatically checks if the app is running in production or development mode
-const API_BASE_URL = 
-  process.env.NODE_ENV === 'production'
-    ? ''                  // Production (Hugging Face): Use relative routing
-    : 'http://127.0.0.1:8000'; // Development (Local Machine): Direct to FastAPI port
 
 export default function Home() {
   const [gameId, setGameId] = useState<string | null>(null);
@@ -20,8 +13,14 @@ export default function Home() {
   const [holds, setHolds] = useState<number[]>([]);
   const [coachSuggestion, setCoachSuggestion] = useState<number[]>([]);
   const [gameState, setGameState] = useState<'IDLE' | 'DEALT' | 'FINISHED'>('IDLE');
-  const [result, setResult] = useState<{ rank: string; payout: number } | null>(null);
-  const [coachCommentary, setCoachCommentary] = useState<string | null>(null); // <-- Added for OpenAI commentary
+  
+  // --- NEW WALLET STATES ---
+  const [balance, setBalance] = useState<number>(1000);
+  const [bet, setBet] = useState<number>(1);
+  const [payoutWon, setPayoutWon] = useState<number | null>(null);
+  
+  const [resultRank, setResultRank] = useState<string | null>(null);
+  const [coachCommentary, setCoachCommentary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const getSuitSymbolAndColor = (suit: string) => {
@@ -37,19 +36,31 @@ export default function Home() {
   const handleDeal = async () => {
     try {
       setError(null);
-      setCoachCommentary(null); // Clear previous round commentary
-      const response = await fetch(`${API_BASE_URL}/deal`);
-      if (!response.ok) throw new Error('Backend server is offline!');
+      setCoachCommentary(null);
+      setPayoutWon(null);
+      setResultRank(null);
+
+      // Append gameId and active bet amount to query string
+      const url = gameId 
+        ? `/deal?game_id=${gameId}&bet=${bet}` 
+        : `/deal?bet=${bet}`;
+
+      const response = await fetch(url);
       const data = await response.json();
+      
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
       
       setGameId(data.game_id);
       setHand(data.hand);
       setCoachSuggestion(data.coach_suggestion);
+      setBalance(data.balance); // Synchronize bankroll balance
       setHolds([]); 
-      setResult(null);
       setGameState('DEALT');
     } catch (err: any) {
-      setError(err.message || 'Failed to deal');
+      setError('Failed to process Deal request.');
     }
   };
 
@@ -64,42 +75,75 @@ export default function Home() {
     if (!gameId) return;
     try {
       setError(null);
-      setCoachCommentary(null); // Clear previous round commentary
-      const response = await fetch(`${API_BASE_URL}/draw`, {
+      const response = await fetch(`/draw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ game_id: gameId, hold_indices: holds }),
       });
-      if (!response.ok) throw new Error('Failed to process draw');
       const data = await response.json();
       
       setHand(data.final_hand);
-      setResult({ rank: data.rank, payout: data.payout });
-      setCoachCommentary(data.coach_commentary); // <-- Set OpenAI feedback here!
+      setResultRank(data.rank);
+      setPayoutWon(data.payout_won);
+      setBalance(data.balance); // Capture winnings update
+      setCoachCommentary(data.coach_commentary);
       setGameState('FINISHED');
     } catch (err: any) {
-      setError(err.message || 'Failed to draw');
+      setError('Failed to process Draw request.');
     }
+  };
+
+  const adjustBet = (amount: number) => {
+    if (gameState === 'DEALT') return; // Lock betting during active hand
+    setBet(amount);
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center p-6">
-      <header className="text-center mb-10">
-        <h1 className="text-4xl font-extrabold tracking-wider bg-gradient-to-r from-emerald-400 to-teal-200 bg-clip-text text-transparent">
-          SMART-HOLD VIDEO POKER
-        </h1>
-        <p className="text-slate-500 mt-2 text-sm uppercase tracking-widest">Next.js 16 + FastAPI MVP</p>
-      </header>
+      
+      {/* HUD: Financial Bankroll Header */}
+      <div className="w-full max-w-4xl flex justify-between items-center mb-6 bg-slate-900 border border-slate-800 px-6 py-4 rounded-xl shadow-lg">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">💰</span>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Your Bankroll</p>
+            <h2 className="text-2xl font-black text-emerald-400">${balance} <span className="text-xs text-slate-500 font-normal">USD</span></h2>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Current Bet</p>
+            <p className="text-xl font-bold text-amber-400">${bet} Credits</p>
+          </div>
+          <div className="flex gap-1 bg-slate-950 p-1 border border-slate-800 rounded-lg">
+            {[1, 2, 3, 4, 5].map((b) => (
+              <button
+                key={b}
+                disabled={gameState === 'DEALT'}
+                onClick={() => adjustBet(b)}
+                className={`w-8 h-8 font-bold rounded text-xs transition-all ${
+                  bet === b 
+                    ? 'bg-amber-500 text-slate-950 shadow' 
+                    : 'text-slate-400 hover:bg-slate-800 disabled:opacity-40'
+                }`}
+              >
+                {b}x
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <div className="w-full max-w-4xl bg-slate-900/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl">
         
         {error && (
           <div className="mb-6 p-4 bg-red-950/40 border border-red-500/30 text-red-400 text-sm rounded-xl text-center font-medium">
-            ⚠️ {error}. Make sure your FastAPI backend is running!
+            ⚠️ {error}
           </div>
         )}
 
-        {/* Card Grid */}
+        {/* Card Layout */}
         <div className="grid grid-cols-5 gap-4 min-h-[180px] mb-8">
           {hand.map((card, idx) => {
             const isHeld = holds.includes(idx);
@@ -135,27 +179,14 @@ export default function Home() {
 
           {hand.length === 0 && (
             <div className="col-span-5 flex items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl h-full py-16 text-sm italic">
-              Click Deal Hand to begin playing...
+              Select a bet size and click Deal Hand to start playing...
             </div>
           )}
         </div>
 
-        {/* Coach Assistant Feedback */}
-        {gameState === 'DEALT' && (
-          <div className="mb-6 p-4 bg-amber-950/20 border border-amber-500/20 rounded-xl flex items-start gap-3">
-            <span className="text-xl">🤖</span>
-            <div>
-              <h4 className="text-sm font-semibold text-amber-400">Coach Strategy Hint</h4>
-              <p className="text-xs text-amber-200/60 mt-0.5">
-                The analyzer recommends holding indices: <span className="font-mono font-bold text-amber-300">[{coachSuggestion.join(', ')}]</span>. 
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* --- NEW: Dynamic AI Coach Commentary Display --- */}
+        {/* Coach Commentary Reveal Box */}
         {gameState === 'FINISHED' && coachCommentary && (
-          <div className="mb-6 p-5 bg-gradient-to-r from-slate-950 to-slate-900 border-l-4 border-teal-400 rounded-r-xl shadow-lg relative overflow-hidden animate-fadeIn">
+          <div className="mb-6 p-5 bg-gradient-to-r from-slate-950 to-slate-900 border-l-4 border-teal-400 rounded-r-xl shadow-lg">
             <div className="flex items-start gap-4">
               <div className="flex flex-col items-center bg-slate-900 border border-slate-800 p-2 rounded-xl min-w-[60px]">
                 <span className="text-2xl mb-1">👑</span>
@@ -164,29 +195,35 @@ export default function Home() {
               <div className="flex-1">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Post-Game Analysis</h4>
                 <p className="text-sm font-medium text-slate-100 italic leading-relaxed">
-                  {coachCommentary}
+                  "{coachCommentary}"
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Results */}
-        {result && (
-          <div className="mb-6 p-4 bg-emerald-950/20 border border-emerald-500/20 rounded-xl text-center">
-            <h3 className="text-2xl font-black text-emerald-400 uppercase tracking-wide">{result.rank}</h3>
-            <p className="text-sm text-slate-400 mt-1">Payout Multiplier: +{result.payout} credits</p>
+        {/* Dynamic Multiplier Payoff Banner */}
+        {payoutWon !== null && resultRank && (
+          <div className={`mb-6 p-4 rounded-xl text-center border transition-all ${
+            payoutWon > 0 
+              ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-400' 
+              : 'bg-slate-950 border-slate-800 text-slate-400'
+          }`}>
+            <h3 className="text-2xl font-black uppercase tracking-wide">{resultRank}</h3>
+            <p className="text-sm mt-1">
+              {payoutWon > 0 ? `💰 Payout Received: +${payoutWon} Credits!` : "❌ No payout combination completed."}
+            </p>
           </div>
         )}
 
-        {/* Action Controls */}
+        {/* Action Button Controls */}
         <div className="flex justify-center gap-4">
           {gameState !== 'DEALT' ? (
             <button 
               onClick={handleDeal}
               className="px-8 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black rounded-xl hover:opacity-90 active:scale-98 transition-all shadow-lg shadow-emerald-500/10"
             >
-              DEAL NEW HAND
+              DEAL NEW HAND (-${bet})
             </button>
           ) : (
             <button 

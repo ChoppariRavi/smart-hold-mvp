@@ -49,30 +49,55 @@ class DealResponse(BaseModel):
     message: str
 
 @router.get("/deal", response_model=DealResponse)
-async def deal_new_hand(seed: Optional[int] = None):
+async def deal_hand(seed: Optional[int] = None, bet: int = 1):
+    import uuid
+   
     deck = Deck(seed=seed)
-    hand = deck.deal(5)
+    current_hand = deck.deal(5)
     game_id = str(uuid.uuid4())
     
-    # Save the state! 
-    game_sessions[game_id] = {
-        "current_hand": hand,
-        "deck": deck.cards 
-    }
+    # If it's a brand new player session, start them with $1,000 chips
+    if not game_id or game_id not in game_sessions:
+        game_id = str(uuid.uuid4())
+        balance = 1000
+    else:
+        balance = game_sessions[game_id]["balance"]
 
+    # Validate bet limits
+    if bet < 1 or bet > 5:
+        bet = 1
+
+    # Check if player has enough chips to play
+    if balance < bet:
+        return {"error": "Insufficient funds! Please reset your bankroll.", "game_id": game_id, "balance": balance}
+
+    # Deduct the bet from the bankroll immediately
+    balance -= bet
+    
     # 1. Directly call your rule-based strategy helper
     # (Make sure to import get_suggested_holds at the top of the file!)
-    suggestion_indices = get_suggested_holds(hand)
+    coach_suggestion = get_suggested_holds(current_hand)
+
+    # Save the state! 
+    game_sessions[game_id] = {
+        "current_hand": current_hand,
+        "deck": deck.cards,
+         "coach_suggestion": coach_suggestion,
+         "balance": balance,
+        "current_bet": bet
+    }
     
     return {
         "game_id": game_id,
-        "hand": hand,
-        "coach_suggestion": suggestion_indices, # Always a clean, precise List[int]
-        "message": "Hand dealt! Use the /draw endpoint to play your hand."
+        "hand": current_hand,
+        "coach_suggestion": coach_suggestion, # Always a clean, precise List[int]
+        "message": "Hand dealt! Use the /draw endpoint to play your hand.",
+        "balance": balance,
+        "current_bet": bet
     }
 
 @router.post("/draw/{game_id}")
-async def draw_cards_old(game_id: str, hold_indices: list[int]):
+async def draw_cards_by_id(game_id: str, hold_indices: list[int]):
     if game_id not in game_sessions:
         raise HTTPException(status_code=404, detail="Game not found")
     
@@ -120,7 +145,13 @@ async def draw_cards(request: DrawRequest):
     suits = [c.suit for c in current_hand]
     final_rank = evaluate_hand(ranks, suits)
     
-   
+   # --- NEW CREDIT CALCULATION ---
+    current_bet = session["current_bet"]
+    payout_multiplier = PAYTABLE.get(final_rank, 0)
+    total_payout = payout_multiplier * current_bet
+    
+    # Add winnings back to the session bankroll
+    session["balance"] += total_payout
 
     # 2. Fire up the AI engine to generate live commentary
     coach_commentary = generate_coach_critique(
@@ -138,6 +169,7 @@ async def draw_cards(request: DrawRequest):
     return {
         "final_hand": current_hand,
         "rank": final_rank,
-        "payout": PAYTABLE.get(final_rank, 0),
+       "payout_won": total_payout,       # Exact credits won this round
+        "balance": session["balance"],     # New absolute total balance
         "coach_commentary": coach_commentary # <-- Add this field to what you return!
     }

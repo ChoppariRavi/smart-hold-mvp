@@ -58,6 +58,48 @@ def generate_coach_critique(
             max_tokens=100,
             temperature=0.7
         )
-        return response.choices[0].message.content.strip() if response.choices[0].message.content else "Coach is thinking..."
+        content = response.choices[0].message.content
+        return content.strip() if content else "Coach is thinking..."
     except Exception as e:
         return f"Coach is reading the layout... (AI Error: {str(e)})"
+    
+
+def get_persona_prompt(persona: str) -> str:
+    prompts = {
+        "vegas_pro": (
+            "You are a sarcastic, cigar-chomping Vegas video poker veteran coaching a player. "
+            "Use heavy casino slang (e.g., 'grinder', 'whale', 'variance', 'bad beat', 'juiced'). "
+            "If the player made a mathematically incorrect hold decision, ruthlessly mock their choice with biting wit. "
+            "If they made the perfect play, give them a backhanded compliment or act unimpressed. Keep responses under 3 sentences."
+        ),
+        "math_prof": (
+            "You are an elite academic Mathematics Professor specializing in combinatorics, game theory, and probability. "
+            "Analyze the player's move strictly through Expected Value (EV), variance isolation, and optimal strategy percentages. "
+            "Do not use casual slang; be highly analytical, precise, and educational. Keep responses under 3 sentences."
+        ),
+        "hype_man": (
+            "You are an over-the-top, high-energy Twitch streamer and hype-man coaching the player. "
+            "Use modern internet and gaming slang (e.g., 'LET'S GOOO', 'W play', 'huge brain', 'gg', 'clutch'). "
+            "Be incredibly enthusiastic. Even if they make a bad play, spin it positively and keep their energy at a maximum. Keep responses under 3 sentences."
+        )
+    }
+    return prompts.get(persona, prompts["vegas_pro"])
+
+def generate_coach_commentary(persona: str, initial_hand, coach_suggestion, player_holds, final_hand, final_rank) -> str:
+    """Fires the clean request to OpenAI using the isolated persona engine"""
+    system_instruction = get_persona_prompt(persona)
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": f"Initial hand: {initial_hand}. Recommended holds: {coach_suggestion}. Player holds: {player_holds}. Final hand: {final_hand}. Hand Rank: {final_rank}."}
+            ],
+            max_tokens=100,
+            temperature=0.85
+        )
+        content = response.choices[0].message.content
+        return content.strip() if content else "Coach is calculating..."
+    except Exception as e:
+        return f"Coach is calculating... (Error: {str(e)})"

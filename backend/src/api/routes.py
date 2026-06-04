@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from src.core.coach import generate_coach_commentary
 from src.core.coach import generate_coach_critique
 from src.models.poker import EvaluationRequest, EvaluationResponse, CardModel
 from src.core.evaluator import evaluate_hand
@@ -81,6 +82,7 @@ async def deal_hand(seed: Optional[int] = None, bet: int = 1):
     # Save the state! 
     game_sessions[game_id] = {
         "current_hand": current_hand,
+        "initial_hand": current_hand.copy(), # Store the original hand for later reference
         "deck": deck.cards,
          "coach_suggestion": coach_suggestion,
          "balance": balance,
@@ -118,6 +120,7 @@ async def draw_cards_by_id(game_id: str, hold_indices: list[int]):
 class DrawRequest(BaseModel):
     game_id: str
     hold_indices: list[int] # e.g., [0, 1, 4] to keep the 1st, 2nd, and 5th cards
+    persona: str = "vegas_pro"
 
 @router.post("/draw")
 async def draw_cards(request: DrawRequest):
@@ -153,13 +156,34 @@ async def draw_cards(request: DrawRequest):
     # Add winnings back to the session bankroll
     session["balance"] += total_payout
 
-    # 2. Fire up the AI engine to generate live commentary
-    coach_commentary = generate_coach_critique(
-        initial_hand=current_hand,
-        optimal_holds=optimal_holds,
+    # Inside your @app.post("/draw") route:
+    # Fetch the requested persona system prompt
+    # system_instruction = get_persona_prompt(request.persona)
+
+    # Generate OpenAI Commentary
+    # response = client.chat.completions.create(
+    #     model="gpt-4o-mini",
+    #     messages=[
+    #         {"role": "system", "content": system_instruction},
+    #         {"role": "user", "content": f"Initial hand was: {session['initial_hand']}. Recommended holds were: {coach_suggestion}. The player chose to hold: {player_holds}. The final drawn hand became: {final_hand} resulting in rank: {final_rank}."}
+    #     ],
+    #     max_tokens=100,
+    #     temperature=0.85 # High temperature for expressive personalities
+    # )
+
+    # print(f"System Prompt for Persona '{request.persona}': {system_instruction}") # Debug log to see the system prompt being sent to the AI
+    # print(f"User Message for AI: Initial hand was: {session['initial_hand']}. Recommended holds were: {optimal_holds}. The player chose to hold: {request.hold_indices}. The final drawn hand became: {current_hand} resulting in rank: {final_rank}.") # Debug log to see the user message being sent to the AI
+
+    # coach_commentary = response.choices[0].message.content
+
+    # Inside your @app.post("/draw") route, simply call it:
+    coach_commentary = generate_coach_commentary(
+        persona=request.persona,
+        initial_hand=session['initial_hand'],
+        coach_suggestion=optimal_holds,
         player_holds=request.hold_indices,
         final_hand=current_hand,
-        hand_rank=final_rank
+        final_rank=final_rank
     )
     print(f"Coach Commentary: {coach_commentary}") # Debug log to see the AI's response in the console
 

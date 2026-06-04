@@ -23,6 +23,9 @@ export default function Home() {
   const [coachCommentary, setCoachCommentary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Inside your main Home component state block:
+  const [persona, setPersona] = useState<string>('vegas_pro');
+
   const getSuitSymbolAndColor = (suit: string) => {
     switch (suit) {
       case 'H': return { symbol: '♥', color: 'text-red-500' };
@@ -42,8 +45,8 @@ export default function Home() {
 
       // Append gameId and active bet amount to query string
       const url = gameId 
-        ? `/deal?game_id=${gameId}&bet=${bet}` 
-        : `/deal?bet=${bet}`;
+        ? `http://localhost:8000/deal?game_id=${gameId}&bet=${bet}` 
+        : `http://localhost:8000/deal?bet=${bet}`;
 
       const response = await fetch(url);
       const data = await response.json();
@@ -75,10 +78,10 @@ export default function Home() {
     if (!gameId) return;
     try {
       setError(null);
-      const response = await fetch(`/draw`, {
+      const response = await fetch(`http://localhost:8000/draw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: gameId, hold_indices: holds }),
+        body: JSON.stringify({ game_id: gameId, hold_indices: holds, persona }),
       });
       const data = await response.json();
       
@@ -100,7 +103,19 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center p-6">
-      
+      {/* Insert this right inside your top HUD panel wrapper */}
+      <div className="flex items-center gap-2 bg-slate-950 p-2 border border-slate-800 rounded-xl">
+        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Coach Character:</label>
+        <select
+          value={persona}
+          onChange={(e) => setPersona(e.target.value)}
+          className="bg-slate-900 text-sm font-semibold text-slate-100 rounded-lg px-3 py-1.5 border border-slate-700 outline-none focus:border-teal-500 transition-all cursor-pointer"
+        >
+          <option value="vegas_pro">🚬 Sarcastic Vegas Pro</option>
+          <option value="math_prof">🎓 Combinatorics Professor</option>
+          <option value="hype_man">🔥 Hype Streamer Dude</option>
+        </select>
+      </div>
       {/* HUD: Financial Bankroll Header */}
       <div className="w-full max-w-4xl flex justify-between items-center mb-6 bg-slate-900 border border-slate-800 px-6 py-4 rounded-xl shadow-lg">
         <div className="flex items-center gap-3">

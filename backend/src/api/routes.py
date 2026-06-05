@@ -156,26 +156,6 @@ async def draw_cards(request: DrawRequest):
     # Add winnings back to the session bankroll
     session["balance"] += total_payout
 
-    # Inside your @app.post("/draw") route:
-    # Fetch the requested persona system prompt
-    # system_instruction = get_persona_prompt(request.persona)
-
-    # Generate OpenAI Commentary
-    # response = client.chat.completions.create(
-    #     model="gpt-4o-mini",
-    #     messages=[
-    #         {"role": "system", "content": system_instruction},
-    #         {"role": "user", "content": f"Initial hand was: {session['initial_hand']}. Recommended holds were: {coach_suggestion}. The player chose to hold: {player_holds}. The final drawn hand became: {final_hand} resulting in rank: {final_rank}."}
-    #     ],
-    #     max_tokens=100,
-    #     temperature=0.85 # High temperature for expressive personalities
-    # )
-
-    # print(f"System Prompt for Persona '{request.persona}': {system_instruction}") # Debug log to see the system prompt being sent to the AI
-    # print(f"User Message for AI: Initial hand was: {session['initial_hand']}. Recommended holds were: {optimal_holds}. The player chose to hold: {request.hold_indices}. The final drawn hand became: {current_hand} resulting in rank: {final_rank}.") # Debug log to see the user message being sent to the AI
-
-    # coach_commentary = response.choices[0].message.content
-
     # Inside your @app.post("/draw") route, simply call it:
     coach_commentary = generate_coach_commentary(
         persona=request.persona,
@@ -189,11 +169,36 @@ async def draw_cards(request: DrawRequest):
 
      # Clean up the session (Game is over)
     del game_sessions[request.game_id]
+
+    # --- NEW: CALCULATE STRATEGY ACCURACY SCORE ---
+    player_set = set(request.hold_indices)
+    coach_set = set(optimal_holds)
+
+    if player_set == coach_set:
+        hand_accuracy = 100
+    elif not player_set and not coach_set:
+        hand_accuracy = 100  # Correctly discarding everything is a perfect play
+    else:
+        # Calculate overlap accuracy
+        matches = len(player_set.intersection(coach_set))
+        total_elements = len(player_set.union(coach_set))
+        hand_accuracy = int((matches / total_elements) * 100) if total_elements > 0 else 0
+
+    # Track lifetime performance inside this session
+    if "accuracy_history" not in session:
+        session["accuracy_history"] = []
+    
+    session["accuracy_history"].append(hand_accuracy)
+    session_average = int(sum(session["accuracy_history"]) / len(session["accuracy_history"]))
+
+    # ... [Your existing drawing, ranking, and coach commentary generation code stays here] ...
     
     return {
         "final_hand": current_hand,
         "rank": final_rank,
        "payout_won": total_payout,       # Exact credits won this round
         "balance": session["balance"],     # New absolute total balance
-        "coach_commentary": coach_commentary # <-- Add this field to what you return!
+        "coach_commentary": coach_commentary, # <-- Add this field to what you return!
+        "hand_accuracy": hand_accuracy,     # Accuracy of the player's hold choices
+        "session_average": session_average  # Long-term average accuracy
     }

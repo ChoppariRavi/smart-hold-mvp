@@ -272,21 +272,37 @@ export default function Home() {
             const isRecommended = coachSuggestion.includes(idx);
             const ui = getSuitSymbolAndColor(card.suit);
 
+            // Determine if the card front should face the player
+            const isFlipped = gameState !== "IDLE";
+
             return (
               <div
                 key={idx}
                 onClick={() => toggleHold(idx)}
-                className='perspective-1000 aspect-[2/3] cursor-pointer select-none'
+                style={{ perspective: "1000px" }}
+                className='aspect-[2/3] cursor-pointer select-none'
               >
-                {/* 3D Wrapper: Rotates globally when hand is active */}
+                {/* 3D Wrapper Layer */}
                 <div
-                  className={`relative w-full h-full duration-500 transform-style-3d transition-transform ${
-                    gameState !== "IDLE" ? "[transform:rotateY(180deg)]" : ""
-                  } ${isHeld ? "-translate-y-2" : ""}`}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    position: "relative",
+                    transition: "transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
+                    transformStyle: "preserve-3d",
+                    transform: `${isFlipped ? "rotateY(180deg)" : "rotateY(0deg)"} ${isHeld ? "translateY(-8px)" : "translateY(0px)"}`,
+                  }}
                 >
-                  {/* FRONT OF THE CARD (Flips into view when state changes) */}
+                  {/* FRONT OF THE CARD */}
                   <div
-                    className={`absolute inset-0 backface-hidden bg-slate-950 border-2 rounded-xl flex flex-col justify-between p-4 shadow-lg [transform:rotateY(180deg)]
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      backfaceVisibility: "hidden",
+                      WebkitBackfaceVisibility: "hidden",
+                      transform: "rotateY(180deg)",
+                    }}
+                    className={`bg-slate-950 border-2 rounded-xl flex flex-col justify-between p-4 shadow-lg
             ${isHeld ? "border-emerald-500 ring-2 ring-emerald-500/20" : "border-slate-800 hover:border-slate-700"}
           `}
                   >
@@ -315,8 +331,17 @@ export default function Home() {
                     )}
                   </div>
 
-                  {/* BACK OF THE CARD (Hidden when flipped) */}
-                  <div className='absolute inset-0 [backface-visibility:hidden] bg-gradient-to-br from-blue-900 to-slate-950 border-2 border-blue-500/40 rounded-xl flex items-center justify-center shadow-xl'>
+                  {/* BACK OF THE CARD */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      backfaceVisibility: "hidden",
+                      WebkitBackfaceVisibility: "hidden",
+                      transform: "rotateY(0deg)",
+                    }}
+                    className='bg-gradient-to-br from-blue-900 to-slate-950 border-2 border-blue-500/40 rounded-xl flex items-center justify-center shadow-xl'
+                  >
                     <div className='w-12 h-12 rounded-full border border-blue-400/20 flex items-center justify-center opacity-40'>
                       <span className='text-xl text-blue-400'>♠</span>
                     </div>

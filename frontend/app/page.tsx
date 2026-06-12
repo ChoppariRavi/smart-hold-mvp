@@ -55,8 +55,8 @@ export default function Home() {
 
       // Append gameId and active bet amount to query string
       const url = gameId
-        ? `/deal?game_id=${gameId}&bet=${bet}`
-        : `/deal?bet=${bet}`;
+        ? `http://localhost:8000/deal?game_id=${gameId}&bet=${bet}`
+        : `http://localhost:8000/deal?bet=${bet}`;
 
       const response = await fetch(url);
       const data = await response.json();
@@ -71,6 +71,7 @@ export default function Home() {
       setCoachSuggestion(data.coach_suggestion);
       setBalance(data.balance); // Synchronize bankroll balance
       setHolds([]);
+      playSound("deal");
       setGameState("DEALT");
     } catch (err: any) {
       setError("Failed to process Deal request.");
@@ -79,6 +80,7 @@ export default function Home() {
 
   const toggleHold = (index: number) => {
     if (gameState !== "DEALT") return;
+    playSound("hold");
     setHolds((prev) =>
       prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index],
     );
@@ -88,7 +90,7 @@ export default function Home() {
     if (!gameId) return;
     try {
       setError(null);
-      const response = await fetch(`/draw`, {
+      const response = await fetch(`http://localhost:8000/draw`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ game_id: gameId, hold_indices: holds, persona }),
@@ -100,6 +102,11 @@ export default function Home() {
       setPayoutWon(data.payout_won);
       setBalance(data.balance); // Capture winnings update
       setCoachCommentary(data.coach_commentary);
+      if (data.payout_won > 0) {
+        playSound("win"); // <-- Trigger winner payouts alert
+      } else {
+        playSound("lose"); // <-- Trigger dead draw warning alert
+      }
       setGameState("FINISHED");
       setHandAccuracy(data.hand_accuracy);
       setSessionAverage(data.session_average);
@@ -111,6 +118,68 @@ export default function Home() {
   const adjustBet = (amount: number) => {
     if (gameState === "DEALT") return; // Lock betting during active hand
     setBet(amount);
+  };
+
+  // Ultimate zero-dependency Audio Synthesizer (Bypasses all network/Base64 corruption issues)
+  const playSound = (type: "deal" | "hold" | "win" | "lose") => {
+    try {
+      // 1. Initialize the browser's native audio context window
+      const AudioContext =
+        window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+
+      // 2. Create the oscillator (sound wave generator) and gain node (volume controller)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      // 3. Define retro arcade sound properties based on the action
+      const now = ctx.currentTime;
+
+      if (type === "deal") {
+        // Soft short mechanical card snap/pop sound
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.08);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } else if (type === "hold") {
+        // Sharp crisp UI click sound
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.setValueAtTime(300, now + 0.03);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.04);
+        osc.start(now);
+        osc.stop(now + 0.04);
+      } else if (type === "win") {
+        // Triumphant ascending double-ding arcade chime!
+        osc.type = "square"; // Classic retro chip flavor
+        osc.frequency.setValueAtTime(523.25, now); // C5 note
+        osc.frequency.setValueAtTime(659.25, now + 0.1); // E5 note
+        osc.frequency.setValueAtTime(783.99, now + 0.2); // G5 note
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.35);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      } else if (type === "lose") {
+        // Clean sliding down sad chime
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(220, now); // A3 note
+        osc.frequency.linearRampToValueAtTime(110, now + 0.25);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.25);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      }
+    } catch (error) {
+      console.warn("Audio playback context initialization skipped:", error);
+    }
   };
 
   return (
@@ -207,33 +276,52 @@ export default function Home() {
               <div
                 key={idx}
                 onClick={() => toggleHold(idx)}
-                className={`relative aspect-[2/3] bg-slate-950 border-2 rounded-xl flex flex-col justify-between p-4 cursor-pointer select-none transition-all duration-200 shadow-lg transform hover:-translate-y-1
-                  ${isHeld ? "border-emerald-500 ring-2 ring-emerald-500/20 scale-102" : "border-slate-800 hover:border-slate-700"}
-                `}
+                className='perspective-1000 aspect-[2/3] cursor-pointer select-none'
               >
-                {isHeld && (
-                  <span className='absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-slate-950 font-bold text-xs px-2 py-0.5 rounded shadow'>
-                    HELD
-                  </span>
-                )}
-
-                <span className={`text-xl font-bold ${ui.color}`}>
-                  {card.value}
-                </span>
-                <span className={`text-4xl self-center ${ui.color}`}>
-                  {ui.symbol}
-                </span>
-                <span
-                  className={`text-xl font-bold self-end rotate-180 ${ui.color}`}
+                {/* 3D Wrapper: Rotates globally when hand is active */}
+                <div
+                  className={`relative w-full h-full duration-500 transform-style-3d transition-transform ${
+                    gameState !== "IDLE" ? "[transform:rotateY(180deg)]" : ""
+                  } ${isHeld ? "-translate-y-2" : ""}`}
                 >
-                  {card.value}
-                </span>
+                  {/* FRONT OF THE CARD (Flips into view when state changes) */}
+                  <div
+                    className={`absolute inset-0 backface-hidden bg-slate-950 border-2 rounded-xl flex flex-col justify-between p-4 shadow-lg [transform:rotateY(180deg)]
+            ${isHeld ? "border-emerald-500 ring-2 ring-emerald-500/20" : "border-slate-800 hover:border-slate-700"}
+          `}
+                  >
+                    {isHeld && (
+                      <span className='absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-slate-950 font-bold text-[10px] px-2 py-0.5 rounded shadow z-10'>
+                        HELD
+                      </span>
+                    )}
 
-                {gameState === "DEALT" && isRecommended && (
-                  <div className='absolute -bottom-2 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 font-bold text-[10px] px-1.5 py-0.5 rounded shadow whitespace-nowrap'>
-                    💡 AI Pick
+                    <span className={`text-xl font-bold ${ui.color}`}>
+                      {card.value}
+                    </span>
+                    <span className={`text-4xl self-center ${ui.color}`}>
+                      {ui.symbol}
+                    </span>
+                    <span
+                      className={`text-xl font-bold self-end rotate-180 ${ui.color}`}
+                    >
+                      {card.value}
+                    </span>
+
+                    {gameState === "DEALT" && isRecommended && (
+                      <div className='absolute -bottom-2 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 font-bold text-[10px] px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10'>
+                        💡 AI Pick
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {/* BACK OF THE CARD (Hidden when flipped) */}
+                  <div className='absolute inset-0 [backface-visibility:hidden] bg-gradient-to-br from-blue-900 to-slate-950 border-2 border-blue-500/40 rounded-xl flex items-center justify-center shadow-xl'>
+                    <div className='w-12 h-12 rounded-full border border-blue-400/20 flex items-center justify-center opacity-40'>
+                      <span className='text-xl text-blue-400'>♠</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             );
           })}

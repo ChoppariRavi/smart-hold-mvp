@@ -7,6 +7,8 @@ interface Card {
   value: string;
 }
 
+const HOST = ""; // <-- Update this to your backend server URL
+
 export default function Home() {
   const [gameId, setGameId] = useState<string | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
@@ -55,8 +57,8 @@ export default function Home() {
 
       // Append gameId and active bet amount to query string
       const url = gameId
-        ? `http://localhost:8000/deal?game_id=${gameId}&bet=${bet}`
-        : `http://localhost:8000/deal?bet=${bet}`;
+        ? `${HOST}/deal?game_id=${gameId}&bet=${bet}`
+        : `${HOST}/deal?bet=${bet}`;
 
       const response = await fetch(url);
       const data = await response.json();
@@ -90,7 +92,7 @@ export default function Home() {
     if (!gameId) return;
     try {
       setError(null);
-      const response = await fetch(`http://localhost:8000/draw`, {
+      const response = await fetch(`${HOST}/draw`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ game_id: gameId, hold_indices: holds, persona }),

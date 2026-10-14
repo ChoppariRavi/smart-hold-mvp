@@ -5,6 +5,9 @@ from typing import List
 from src.models.poker import CardModel
 from config import Config
 
+# backend/coach.py
+import random
+
 # Initialize the OpenAI client (grabs OPENAI_API_KEY from environment)
 client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
@@ -85,21 +88,82 @@ def get_persona_prompt(persona: str) -> str:
     }
     return prompts.get(persona, prompts["vegas_pro"])
 
-def generate_coach_commentary(persona: str, initial_hand, coach_suggestion, player_holds, final_hand, final_rank) -> str:
-    """Fires the clean request to OpenAI using the isolated persona engine"""
-    system_instruction = get_persona_prompt(persona)
+
+COMMENTARY_TEMPLATES = {
+    "vegas_pro": {
+        "perfect_win": [
+            "Look at that—you actually played the math and got paid. Don't let it go to your head, kid.",
+            "Textbook play and the variance paid off. Take the chips before the house notices.",
+            "Solid hold. Even a blind squirrel finds a nut once in a while on the Strip."
+        ],
+        "perfect_loss": [
+            "Textbook hold, but the deck froze up on you. That's Vegas for you—variance is a cruel beast.",
+            "You made the 100% correct play and got a nothing burger. Don't tilt, the math was right.",
+            "Played it like a seasoned grinder, just took a bad beat on the draw. Deal another."
+        ],
+        "blunder": [
+            "What was that hold? You tossed the winning combination straight into the muck!",
+            "Holding those cards is a great way to end up washing dishes in the casino kitchen.",
+            "Total punt. You completely ignored the optimal hold and the dealer ate your bet."
+        ],
+        "mediocre": [
+            "You got part of the play right, but you left EV on the felt.",
+            "Sloppy hold. You kept the right piece but dragged garbage along with it."
+        ]
+    },
+    "math_prof": {
+        "perfect_win": [
+            "Optimal decision verified (100% GTO). Positive expected value realized on the draw.",
+            "Holding the mathematically dominant subset maximized your return frequency here.",
+            "Flawless combinatoric choice resulting in positive variance. Excellent execution."
+        ],
+        "perfect_loss": [
+            "GTO accuracy was 100%. While the payout was 0, your decision maximized long-term EV.",
+            "A statistically optimal hold with an unfortunate sample outcome. Long-run regression favors this play.",
+            "Expected value was maximized. Short-term variance simply did not materialize in a payout."
+        ],
+        "blunder": [
+            "Sub-optimal play (0% GTO). That hold subset drastically degrades long-term return.",
+            "Mathematical error: you discarded cards with significant combinatoric value.",
+            "Major EV leakage detected. That decision carries a severely negative expectation over standard distributions."
+        ],
+        "mediocre": [
+            "Partially optimal, but retaining extraneous cards diluted your hand's total expectation.",
+            "Incomplete subset chosen. You captured some equity while sacrificing optimal frequency."
+        ]
+    },
+    "hype_man": {
+        "perfect_win": [
+            "LET'S GOOO! 100% big brain hold and we cashed out! Pure skill!",
+            "W play right there! Textbook moves and the deck delivered! We're up!",
+            "HUGE BRAIN PLAY! That’s how you run the table! Keep that streak alive!"
+        ],
+        "perfect_loss": [
+            "Unlucky draw, but that hold was clean! 100% accuracy, we bounce back next hand!",
+            "Deck did you dirty, but the play was elite! Shrug it off, run it back!",
+            "Tough break on the cards, but the decision was top-tier! The next one is ours!"
+        ],
+        "blunder": [
+            "Oof, absolute misclick moment! Threw away the good cards, but we adapt and reset!",
+            "Not the play, my friend! We gave away free equity there, but lock in for the next deal!",
+            "Down bad on that hold! Shake it off, check the AI pick next time, and let's get it back!"
+        ],
+        "mediocre": [
+            "Halfway there! Good instinct on the main card, just gotta trim the extra dead weight!",
+            "Not bad, but we can make it cleaner! Stick to the prime cards next round!"
+        ]
+    }
+}
+
+def generate_coach_commentary(persona: str, hand_accuracy: int, payout_won: int) -> str:
+    """Generates instant, deterministic commentary with zero API costs."""
+    role_templates = COMMENTARY_TEMPLATES.get(persona, COMMENTARY_TEMPLATES["vegas_pro"])
     
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": f"Initial hand: {initial_hand}. Recommended holds: {coach_suggestion}. Player holds: {player_holds}. Final hand: {final_hand}. Hand Rank: {final_rank}."}
-            ],
-            max_tokens=100,
-            temperature=0.85
-        )
-        content = response.choices[0].message.content
-        return content.strip() if content else "Coach is calculating..."
-    except Exception as e:
-        return f"Coach is calculating... (Error: {str(e)})"
+    if hand_accuracy == 100:
+        category = "perfect_win" if payout_won > 0 else "perfect_loss"
+    elif hand_accuracy == 0:
+        category = "blunder"
+    else:
+        category = "mediocre"
+        
+    return random.choice(role_templates[category])

@@ -156,17 +156,6 @@ async def draw_cards(request: DrawRequest):
     # Add winnings back to the session bankroll
     session["balance"] += total_payout
 
-    # Inside your @app.post("/draw") route, simply call it:
-    coach_commentary = generate_coach_commentary(
-        persona=request.persona,
-        initial_hand=session['initial_hand'],
-        coach_suggestion=optimal_holds,
-        player_holds=request.hold_indices,
-        final_hand=current_hand,
-        final_rank=final_rank
-    )
-    print(f"Coach Commentary: {coach_commentary}") # Debug log to see the AI's response in the console
-
      # Clean up the session (Game is over)
     del game_sessions[request.game_id]
 
@@ -191,6 +180,21 @@ async def draw_cards(request: DrawRequest):
     session["accuracy_history"].append(hand_accuracy)
     session_average = int(sum(session["accuracy_history"]) / len(session["accuracy_history"]))
 
+    # Inside your @app.post("/draw") route, simply call it:
+    # coach_commentary = generate_coach_commentary(
+    #     persona=request.persona,
+    #     initial_hand=session['initial_hand'],
+    #     coach_suggestion=optimal_holds,
+    #     player_holds=request.hold_indices,
+    #     final_hand=current_hand,
+    #     final_rank=final_rank
+    # )
+    coach_commentary = generate_coach_commentary(
+        persona=request.persona,
+        hand_accuracy=current_hand,
+        payout_won=total_payout
+    )
+    print(f"Coach Commentary: {coach_commentary}") # Debug log to see the AI's response in the console
     # ... [Your existing drawing, ranking, and coach commentary generation code stays here] ...
     
     return {

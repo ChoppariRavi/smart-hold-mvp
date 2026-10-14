@@ -1,484 +1,584 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import RulesModal from "./components/RulesModal";
+// Inside frontend/src/app/page.tsx
+import {
+  Card,
+  generateDeck,
+  evaluateHandRank,
+  calculatePayout,
+  getOptimalHolds,
+  getCoachCommentary,
+} from "./core/pokerEngine";
 
-interface Card {
-  suit: "H" | "D" | "C" | "S";
-  value: string;
-}
+const STORAGE_KEYS = {
+  BANKROLL: "shp_bankroll",
+  ACCURACY_HISTORY: "shp_accuracy_history",
+  PERSONA: "shp_persona",
+  BET: "shp_current_bet",
+};
 
-const HOST = ""; // <-- Update this to your backend server URL
+const INITIAL_BANKROLL = 1000;
+const INITIAL_PERSONA = "vegas_pro";
 
-export default function Home() {
+const SUIT_META: Record<
+  string,
+  { symbol: string; color: string; name: string }
+> = {
+  H: { symbol: "♥", color: "text-rose-400", name: "Hearts" },
+  HEARTS: { symbol: "♥", color: "text-rose-400", name: "Hearts" },
+  D: { symbol: "♦", color: "text-blue-400", name: "Diamonds" },
+  DIAMONDS: { symbol: "♦", color: "text-blue-400", name: "Diamonds" },
+  C: { symbol: "♣", color: "text-emerald-400", name: "Clubs" },
+  CLUBS: { symbol: "♣", color: "text-emerald-400", name: "Clubs" },
+  S: { symbol: "♠", color: "text-slate-100", name: "Spades" },
+  SPADES: { symbol: "♠", color: "text-slate-100", name: "Spades" },
+};
+
+const HOST = process.env.NEXT_PUBLIC_API_HOST || "http://localhost:8000";
+
+export default function PokerGame() {
   const [gameId, setGameId] = useState<string | null>(null);
-  const [hand, setHand] = useState<Card[]>([]);
+  const [hand, setHand] = useState<(Card | null)[]>([
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
   const [holds, setHolds] = useState<number[]>([]);
   const [coachSuggestion, setCoachSuggestion] = useState<number[]>([]);
   const [gameState, setGameState] = useState<"IDLE" | "DEALT" | "FINISHED">(
     "IDLE",
   );
 
-  // --- NEW WALLET STATES ---
-  const [balance, setBalance] = useState<number>(1000);
+  // Persistent States
+  const [balance, setBalance] = useState<number>(INITIAL_BANKROLL);
+  const [accuracyHistory, setAccuracyHistory] = useState<number[]>([]);
+  const [sessionAverage, setSessionAverage] = useState<number>(100);
+  const [persona, setPersona] = useState<string>(INITIAL_PERSONA);
   const [bet, setBet] = useState<number>(1);
-  const [payoutWon, setPayoutWon] = useState<number | null>(null);
 
+  // Round Results
+  const [handAccuracy, setHandAccuracy] = useState<number | null>(null);
+  const [payoutWon, setPayoutWon] = useState<number | null>(null);
   const [resultRank, setResultRank] = useState<string | null>(null);
   const [coachCommentary, setCoachCommentary] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  // Inside your main Home component state block:
-  const [persona, setPersona] = useState<string>("vegas_pro");
-  const [handAccuracy, setHandAccuracy] = useState<number | null>(null);
-  const [sessionAverage, setSessionAverage] = useState<number>(100);
+  // Modals & Hydration
+  const [showRulesModal, setShowRulesModal] = useState<boolean>(false);
+  const [showResetModal, setShowResetModal] = useState<boolean>(false);
+  const [isHydrated, setIsHydrated] = useState<boolean>(false);
 
-  const getSuitSymbolAndColor = (suit: string) => {
-    switch (suit) {
-      case "H":
-        return { symbol: "♥", color: "text-red-500" };
-      case "D":
-        return { symbol: "♦", color: "text-blue-400" };
-      case "C":
-        return { symbol: "♣", color: "text-emerald-400" };
-      case "S":
-        return { symbol: "♠", color: "text-slate-300" };
-      default:
-        return { symbol: "?", color: "text-gray-400" };
-    }
-  };
+  // Inside component:
+  const [deck, setDeck] = useState<Card[]>([]);
+  const [optimalHolds, setOptimalHolds] = useState<number[]>([]);
 
-  const handleDeal = async () => {
+  // 1. Initial State Hydration
+  useEffect(() => {
     try {
-      setError(null);
-      setCoachCommentary(null);
-      setPayoutWon(null);
-      setResultRank(null);
-      setHandAccuracy(null); // Clear previous hand score
+      const savedBalance = localStorage.getItem(STORAGE_KEYS.BANKROLL);
+      const savedHistory = localStorage.getItem(STORAGE_KEYS.ACCURACY_HISTORY);
+      const savedPersona = localStorage.getItem(STORAGE_KEYS.PERSONA);
+      const savedBet = localStorage.getItem(STORAGE_KEYS.BET);
 
-      // Append gameId and active bet amount to query string
-      const url = gameId
-        ? `${HOST}/deal?game_id=${gameId}&bet=${bet}`
-        : `${HOST}/deal?bet=${bet}`;
+      if (savedBalance !== null)
+        setBalance(Number(savedBalance) || INITIAL_BANKROLL);
+      if (savedHistory !== null) {
+        const hist = JSON.parse(savedHistory);
+        if (Array.isArray(hist) && hist.length > 0) {
+          setAccuracyHistory(hist);
+          setSessionAverage(
+            Math.round(hist.reduce((a, b) => a + b, 0) / hist.length),
+          );
+        }
+      }
+      if (savedPersona) setPersona(savedPersona);
+      if (savedBet !== null) setBet(Number(savedBet) || 1);
+    } catch {
+      // Graceful fallback on storage access blocks
+    } finally {
+      setIsHydrated(true);
+    }
+  }, []);
 
-      const response = await fetch(url);
-      const data = await response.json();
+  // 2. LocalStorage Syncing
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(STORAGE_KEYS.BANKROLL, balance?.toString());
+  }, [balance, isHydrated]);
 
-      if (data.error) {
-        setError(data.error);
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(
+      STORAGE_KEYS.ACCURACY_HISTORY,
+      JSON.stringify(accuracyHistory),
+    );
+    if (accuracyHistory.length > 0) {
+      setSessionAverage(
+        Math.round(
+          accuracyHistory.reduce((a, b) => a + b, 0) / accuracyHistory.length,
+        ),
+      );
+    }
+  }, [accuracyHistory, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(STORAGE_KEYS.PERSONA, persona);
+  }, [persona, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(STORAGE_KEYS.BET, bet.toString());
+  }, [bet, isHydrated]);
+
+  const toggleHold = useCallback(
+    (index: number) => {
+      if (gameState !== "DEALT") return;
+      setHolds((prev) =>
+        prev.includes(index)
+          ? prev.filter((i) => i !== index)
+          : [...prev, index],
+      );
+    },
+    [gameState],
+  );
+
+  // Handle Deal (0 network calls, < 5ms)
+  const handleDeal = useCallback(() => {
+    if (balance < bet) {
+      setShowResetModal(true);
+      return;
+    }
+
+    // Deduct bet
+    setBalance((prev) => prev - bet);
+    setCoachCommentary(null);
+    setPayoutWon(null);
+    setResultRank(null);
+    setHandAccuracy(null);
+    setHolds([]);
+
+    // Generate & deal 5 cards
+    const newDeck = generateDeck();
+    const dealtHand = newDeck.slice(0, 5);
+    const remaining = newDeck.slice(5);
+
+    // Compute GTO Hold recommendation instantly
+    const optimal = getOptimalHolds(dealtHand);
+
+    setDeck(remaining);
+    setHand(dealtHand);
+    setOptimalHolds(optimal.holds);
+    setCoachSuggestion(optimal.holds);
+    setGameState("DEALT");
+  }, [balance, bet]);
+
+  // Handle Draw (0 network calls, < 1ms)
+  const handleDraw = useCallback(() => {
+    if (gameState !== "DEALT") return;
+
+    const finalHand = [...hand];
+    let deckIndex = 0;
+    const currentDeck = [...deck];
+
+    // Replace unheld cards
+    for (let i = 0; i < 5; i++) {
+      if (!holds.includes(i)) {
+        finalHand[i] = currentDeck[deckIndex++];
+      }
+    }
+
+    // Evaluate final rank & payout
+    const finalRank = evaluateHandRank(finalHand as Card[]);
+    const payout = calculatePayout(finalRank, bet);
+
+    // Calculate Accuracy vs GTO
+    const isMatch =
+      holds.length === optimalHolds.length &&
+      holds.every((idx) => optimalHolds.includes(idx));
+    const currentAcc = isMatch
+      ? 100
+      : Math.max(
+          10,
+          100 - (5 - holds.filter((h) => optimalHolds.includes(h)).length) * 25,
+        );
+
+    const heldCards = holds.map((i) => hand[i] as Card);
+    const optCards = optimalHolds.map((i) => hand[i] as Card);
+
+    const commentary = getCoachCommentary(
+      persona,
+      currentAcc,
+      payout,
+      heldCards,
+      optCards,
+    );
+
+    // Update State
+    setHand(finalHand);
+    setResultRank(finalRank);
+    setPayoutWon(payout);
+    setBalance((prev) => prev + payout);
+    setCoachCommentary(commentary);
+    setHandAccuracy(currentAcc);
+    setAccuracyHistory((prev) => [...prev, currentAcc]);
+    setGameState("FINISHED");
+  }, [gameState, hand, holds, deck, bet, optimalHolds, persona]);
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = document.activeElement?.tagName.toLowerCase();
+      if (target === "input" || target === "textarea" || target === "select")
+        return;
+
+      if (showRulesModal || showResetModal) {
+        if (e.key === "Escape") {
+          setShowRulesModal(false);
+          setShowResetModal(false);
+        }
         return;
       }
 
-      setGameId(data.game_id);
-      setHand(data.hand);
-      setCoachSuggestion(data.coach_suggestion);
-      setBalance(data.balance); // Synchronize bankroll balance
-      setHolds([]);
-      playSound("deal");
-      setGameState("DEALT");
-    } catch (err: any) {
-      setError("Failed to process Deal request.");
-    }
-  };
-
-  const toggleHold = (index: number) => {
-    if (gameState !== "DEALT") return;
-    playSound("hold");
-    setHolds((prev) =>
-      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index],
-    );
-  };
-
-  const handleDraw = async () => {
-    if (!gameId) return;
-    try {
-      setError(null);
-      const response = await fetch(`${HOST}/draw`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ game_id: gameId, hold_indices: holds, persona }),
-      });
-      const data = await response.json();
-
-      setHand(data.final_hand);
-      setResultRank(data.rank);
-      setPayoutWon(data.payout_won);
-      setBalance(data.balance); // Capture winnings update
-      setCoachCommentary(data.coach_commentary);
-      if (data.payout_won > 0) {
-        playSound("win"); // <-- Trigger winner payouts alert
-      } else {
-        playSound("lose"); // <-- Trigger dead draw warning alert
+      if (["1", "2", "3", "4", "5"].includes(e.key)) {
+        e.preventDefault();
+        toggleHold(parseInt(e.key, 10) - 1);
+        return;
       }
-      setGameState("FINISHED");
-      setHandAccuracy(data.hand_accuracy);
-      setSessionAverage(data.session_average);
-    } catch (err: any) {
-      setError("Failed to process Draw request.");
-    }
-  };
 
-  const adjustBet = (amount: number) => {
-    if (gameState === "DEALT") return; // Lock betting during active hand
-    setBet(amount);
-  };
-
-  // Ultimate zero-dependency Audio Synthesizer (Bypasses all network/Base64 corruption issues)
-  const playSound = (type: "deal" | "hold" | "win" | "lose") => {
-    try {
-      // 1. Initialize the browser's native audio context window
-      const AudioContext =
-        window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
-
-      // 2. Create the oscillator (sound wave generator) and gain node (volume controller)
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      // 3. Define retro arcade sound properties based on the action
-      const now = ctx.currentTime;
-
-      if (type === "deal") {
-        // Soft short mechanical card snap/pop sound
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(150, now);
-        osc.frequency.exponentialRampToValueAtTime(300, now + 0.08);
-        gain.gain.setValueAtTime(0.15, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.08);
-        osc.start(now);
-        osc.stop(now + 0.08);
-      } else if (type === "hold") {
-        // Sharp crisp UI click sound
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(600, now);
-        osc.frequency.setValueAtTime(300, now + 0.03);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.04);
-        osc.start(now);
-        osc.stop(now + 0.04);
-      } else if (type === "win") {
-        // Triumphant ascending double-ding arcade chime!
-        osc.type = "square"; // Classic retro chip flavor
-        osc.frequency.setValueAtTime(523.25, now); // C5 note
-        osc.frequency.setValueAtTime(659.25, now + 0.1); // E5 note
-        osc.frequency.setValueAtTime(783.99, now + 0.2); // G5 note
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.35);
-        osc.start(now);
-        osc.stop(now + 0.35);
-      } else if (type === "lose") {
-        // Clean sliding down sad chime
-        osc.type = "sawtooth";
-        osc.frequency.setValueAtTime(220, now); // A3 note
-        osc.frequency.linearRampToValueAtTime(110, now + 0.25);
-        gain.gain.setValueAtTime(0.12, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.25);
-        osc.start(now);
-        osc.stop(now + 0.25);
+      if (e.code === "Space" || e.key === " ") {
+        e.preventDefault();
+        if (gameState === "DEALT") handleDraw();
+        else handleDeal();
       }
-    } catch (error) {
-      console.warn("Audio playback context initialization skipped:", error);
-    }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    gameState,
+    showRulesModal,
+    showResetModal,
+    toggleHold,
+    handleDraw,
+    handleDeal,
+  ]);
+
+  const handleReset = () => {
+    setBalance(INITIAL_BANKROLL);
+    setAccuracyHistory([]);
+    setSessionAverage(100);
+    setHandAccuracy(null);
+    setPayoutWon(null);
+    setResultRank(null);
+    setCoachCommentary(null);
+    setShowResetModal(false);
+    localStorage.setItem(STORAGE_KEYS.BANKROLL, INITIAL_BANKROLL.toString());
+    localStorage.removeItem(STORAGE_KEYS.ACCURACY_HISTORY);
   };
 
   return (
-    <div className='min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center p-6'>
-      {/* Insert this right inside your top HUD panel wrapper */}
-      <div className='flex items-center gap-2 bg-slate-950 p-2 border border-slate-800 rounded-xl'>
-        <label className='text-xs font-bold text-slate-500 uppercase tracking-wider pl-1'>
-          Coach Character:
-        </label>
-        <select
-          value={persona}
-          onChange={(e) => setPersona(e.target.value)}
-          className='bg-slate-900 text-sm font-semibold text-slate-100 rounded-lg px-3 py-1.5 border border-slate-700 outline-none focus:border-teal-500 transition-all cursor-pointer'
-        >
-          <option value='vegas_pro'>🚬 Sarcastic Vegas Pro</option>
-          <option value='math_prof'>🎓 Combinatorics Professor</option>
-          <option value='hype_man'>🔥 Hype Streamer Dude</option>
-        </select>
-      </div>
-      {/* HUD: Financial Bankroll Header */}
-      <div className='w-full max-w-4xl flex justify-between items-center mb-6 bg-slate-900 border border-slate-800 px-6 py-4 rounded-xl shadow-lg'>
-        <div className='flex items-center gap-3'>
-          <span className='text-2xl'>💰</span>
-          <div>
-            <p className='text-xs font-semibold uppercase tracking-widest text-slate-400'>
-              Your Bankroll
-            </p>
-            <h2 className='text-2xl font-black text-emerald-400'>
-              ${balance}{" "}
-              <span className='text-xs text-slate-500 font-normal'>USD</span>
-            </h2>
+    <main className='h-dvh h-screen w-full bg-slate-950 text-slate-100 flex flex-col justify-between overflow-hidden select-none touch-manipulation font-sans'>
+      {/* 1. HUD: Static Height (52px) */}
+      <header className='h-[52px] flex-none px-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between z-10'>
+        <div className='flex items-center gap-2'>
+          <div className='flex flex-col'>
+            <span className='text-[10px] font-bold tracking-widest text-slate-400 uppercase leading-none'>
+              Bankroll
+            </span>
+            <span className='text-base font-black text-emerald-400 leading-tight'>
+              ${isHydrated ? balance : INITIAL_BANKROLL}
+            </span>
           </div>
+          <button
+            onClick={() => setShowResetModal(true)}
+            aria-label='Reset Bankroll and Session Stats'
+            className='p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-400 active:scale-95 transition'
+          >
+            <svg
+              className='w-3.5 h-3.5'
+              aria-hidden='true'
+              fill='none'
+              stroke='currentColor'
+              viewBox='0 0 24 24'
+            >
+              <path
+                strokeLinecap='round'
+                strokeLinejoin='round'
+                strokeWidth='2.5'
+                d='M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15'
+              />
+            </svg>
+          </button>
         </div>
 
-        <div className='flex items-center gap-4'>
-          <div className='text-right'>
-            <p className='text-xs font-semibold uppercase tracking-widest text-slate-400'>
-              Current Bet
+        {/* Accuracy Tracker */}
+        <div
+          className='flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2 py-1 rounded-lg'
+          aria-label={`Session GTO Accuracy: ${sessionAverage}%`}
+        >
+          <span className='text-[10px] uppercase font-bold text-slate-400'>
+            GTO Acc
+          </span>
+          <span
+            className={`text-xs font-black ${sessionAverage >= 90 ? "text-emerald-400" : sessionAverage >= 70 ? "text-amber-400" : "text-rose-400"}`}
+          >
+            {sessionAverage}%
+          </span>
+        </div>
+
+        {/* Persona & Guide */}
+        <div className='flex items-center gap-1.5'>
+          <label htmlFor='persona-select' className='sr-only'>
+            Choose AI Coach Persona
+          </label>
+          <select
+            id='persona-select'
+            value={persona}
+            onChange={(e) => setPersona(e.target.value)}
+            className='text-xs bg-slate-800 border border-slate-700 rounded-md px-2 py-1 font-semibold text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-400'
+          >
+            <option value='vegas_pro'>Vegas Pro</option>
+            <option value='math_prof'>Professor</option>
+            <option value='hype_man'>Hype Man</option>
+          </select>
+
+          <button
+            type='button'
+            onClick={() => setShowRulesModal(true)}
+            aria-label='Open 9/6 Paytable and Game Rules'
+            className='w-7 h-7 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-emerald-400 font-bold text-xs flex items-center justify-center border border-slate-700 transition active:scale-95'
+          >
+            ℹ️
+          </button>
+        </div>
+      </header>
+
+      {/* 2. OUTCOME & COACH COMMENTARY: Fixed Reserved Height (68px) to Prevent CLS */}
+      <section
+        className='h-[68px] flex-none px-4 flex flex-col items-center justify-center text-center overflow-hidden'
+        aria-live='polite'
+      >
+        <div className='h-6 flex items-center justify-center gap-2'>
+          {resultRank ? (
+            <>
+              <span className='text-xs font-black tracking-wide uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'>
+                {resultRank.replace(/_/g, " ")}
+              </span>
+              {payoutWon !== null && payoutWon > 0 && (
+                <span className='text-xs font-black text-amber-300'>
+                  +{payoutWon} chips
+                </span>
+              )}
+            </>
+          ) : (
+            <span className='text-[11px] uppercase tracking-widest text-slate-500 font-semibold'>
+              {gameState === "DEALT"
+                ? "Select holds then draw"
+                : "Select coins and deal"}
+            </span>
+          )}
+        </div>
+
+        <div className='h-8 flex items-center justify-center w-full max-w-md'>
+          {coachCommentary ? (
+            <p className='text-[11px] sm:text-xs text-slate-300 font-medium truncate px-2 py-0.5 bg-slate-900/60 rounded border border-slate-800/60 w-full'>
+              "{coachCommentary}"
             </p>
-            <p className='text-xl font-bold text-amber-400'>${bet} Credits</p>
-          </div>
-          <div className='flex gap-1 bg-slate-950 p-1 border border-slate-800 rounded-lg'>
-            {[1, 2, 3, 4, 5].map((b) => (
+          ) : (
+            <div className='w-16 h-1 bg-slate-800/40 rounded-full' />
+          )}
+        </div>
+      </section>
+
+      {/* 3. CARD CONTAINER: Strict Geometry Reservation (CLS = 0) */}
+      <section className='flex-1 w-full max-w-xl mx-auto px-2 flex items-center justify-center'>
+        <div className='grid grid-cols-5 gap-1.5 sm:gap-2.5 w-full'>
+          {hand.map((card, idx) => {
+            const isHeld = holds.includes(idx);
+            const isSuggested =
+              coachSuggestion.includes(idx) && gameState === "DEALT";
+            const suit = card
+              ? SUIT_META[card.suit] || {
+                  symbol: card.suit,
+                  color: "text-slate-100",
+                  name: card.suit,
+                }
+              : null;
+            const cardLabel = card
+              ? `${card.value} of ${suit?.name}`
+              : `Card ${idx + 1} empty`;
+
+            return (
               <button
-                key={b}
+                key={idx}
+                type='button'
+                role='button'
+                aria-pressed={isHeld}
+                aria-label={`${cardLabel}${isHeld ? " (Held)" : ""}${isSuggested ? " (Optimal play)" : ""}`}
+                disabled={gameState !== "DEALT"}
+                onClick={() => toggleHold(idx)}
+                className={`relative flex flex-col justify-between items-center rounded-xl p-1 sm:p-2.5 select-none w-full
+                  aspect-[2/3] max-h-48 sm:max-h-56
+                  transition-transform duration-100 will-change-transform
+                  ${gameState === "DEALT" ? "cursor-pointer active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-400" : "cursor-default"}
+                  ${isHeld ? "bg-slate-800 border-2 border-emerald-400 shadow-md shadow-emerald-500/20 -translate-y-2.5" : "bg-slate-900 border border-slate-800"}
+                  ${!card ? "border-dashed border-slate-800/60 bg-slate-950/30" : ""}
+                `}
+              >
+                {/* Hold Status Badge: Fixed height */}
+                <div className='h-4 flex items-center justify-center'>
+                  <span
+                    className={`text-[10px] sm:text-xs font-black tracking-wider uppercase px-1 rounded transition-opacity duration-100 ${isHeld ? "bg-emerald-400 text-slate-950 opacity-100" : "opacity-0"}`}
+                  >
+                    HELD
+                  </span>
+                </div>
+
+                {/* Card Face & Suit */}
+                {card && suit ? (
+                  <div className='flex flex-col items-center'>
+                    <span
+                      className={`text-base sm:text-2xl font-black ${suit.color} leading-none tracking-tight`}
+                    >
+                      {card.value}
+                    </span>
+                    <span
+                      className={`text-xl sm:text-3xl ${suit.color} leading-none mt-0.5`}
+                    >
+                      {suit.symbol}
+                    </span>
+                  </div>
+                ) : (
+                  <div className='w-5 h-8 rounded border border-slate-800/40 opacity-20 my-auto' />
+                )}
+
+                {/* GTO Badge + Hotkey Tag: Fixed height */}
+                <div className='h-4 flex items-center justify-center gap-1'>
+                  {isSuggested && (
+                    <span className='text-[9px] font-bold text-amber-300 uppercase tracking-tighter bg-amber-500/10 px-1 rounded border border-amber-500/20'>
+                      ★ GTO
+                    </span>
+                  )}
+                  <span className='hidden sm:inline-block text-[9px] font-mono text-slate-500 bg-slate-950/80 px-1 rounded border border-slate-800'>
+                    [{idx + 1}]
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 4. CONTROLS: Strict Height (128px) */}
+      <footer className='h-[128px] flex-none w-full max-w-xl mx-auto px-3 pb-3 flex flex-col justify-end space-y-2'>
+        {/* Bet Stepper */}
+        <div className='flex items-center justify-between gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl'>
+          <span className='text-[10px] uppercase font-bold text-slate-400 pl-2'>
+            Bet Coins
+          </span>
+          <div
+            className='flex gap-1'
+            role='radiogroup'
+            aria-label='Bet level in coins'
+          >
+            {[1, 2, 3, 4, 5].map((lvl) => (
+              <button
+                key={lvl}
+                type='button'
+                role='radio'
+                aria-checked={bet === lvl}
                 disabled={gameState === "DEALT"}
-                onClick={() => adjustBet(b)}
-                className={`w-8 h-8 font-bold rounded text-xs transition-all ${
-                  bet === b
-                    ? "bg-amber-500 text-slate-950 shadow"
-                    : "text-slate-400 hover:bg-slate-800 disabled:opacity-40"
+                onClick={() => setBet(lvl)}
+                className={`w-9 h-7 rounded-lg text-xs font-extrabold transition-colors ${
+                  bet === lvl
+                    ? "bg-emerald-500 text-slate-950 shadow-sm"
+                    : "bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
                 }`}
               >
-                {b}x
+                {lvl}x
               </button>
             ))}
           </div>
         </div>
 
-        {/* Put this next to your Current Bet section in the HUD Header Panel */}
-        <div className='text-right'>
-          <p className='text-xs font-semibold uppercase tracking-widest text-slate-400'>
-            GTO Accuracy
-          </p>
-          <p
-            className={`text-xl font-black ${
-              sessionAverage >= 90
-                ? "text-emerald-400"
-                : sessionAverage >= 70
-                  ? "text-amber-400"
-                  : "text-red-400"
-            }`}
+        {/* Action Button */}
+        {gameState === "DEALT" ? (
+          <button
+            type='button'
+            onClick={handleDraw}
+            className='w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-transform flex items-center justify-center gap-2'
           >
-            {sessionAverage}%
-          </p>
-        </div>
-      </div>
-
-      <div className='w-full max-w-4xl bg-slate-900/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl'>
-        {error && (
-          <div className='mb-6 p-4 bg-red-950/40 border border-red-500/30 text-red-400 text-sm rounded-xl text-center font-medium'>
-            ⚠️ {error}
-          </div>
-        )}
-
-        {/* Card Layout */}
-        <div className='grid grid-cols-5 gap-4 min-h-[180px] mb-8'>
-          {hand.map((card, idx) => {
-            const isHeld = holds.includes(idx);
-            const isRecommended = coachSuggestion.includes(idx);
-            const ui = getSuitSymbolAndColor(card.suit);
-
-            // Determine if the card front should face the player
-            const isFlipped = gameState !== "IDLE";
-
-            return (
-              <div
-                key={idx}
-                onClick={() => toggleHold(idx)}
-                style={{ perspective: "1000px" }}
-                className='aspect-[2/3] cursor-pointer select-none'
-              >
-                {/* 3D Wrapper Layer */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    position: "relative",
-                    transition: "transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
-                    transformStyle: "preserve-3d",
-                    transform: `${isFlipped ? "rotateY(180deg)" : "rotateY(0deg)"} ${isHeld ? "translateY(-8px)" : "translateY(0px)"}`,
-                  }}
-                >
-                  {/* FRONT OF THE CARD */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      backfaceVisibility: "hidden",
-                      WebkitBackfaceVisibility: "hidden",
-                      transform: "rotateY(180deg)",
-                    }}
-                    className={`bg-slate-950 border-2 rounded-xl flex flex-col justify-between p-4 shadow-lg
-            ${isHeld ? "border-emerald-500 ring-2 ring-emerald-500/20" : "border-slate-800 hover:border-slate-700"}
-          `}
-                  >
-                    {isHeld && (
-                      <span className='absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-slate-950 font-bold text-[10px] px-2 py-0.5 rounded shadow z-10'>
-                        HELD
-                      </span>
-                    )}
-
-                    <span className={`text-xl font-bold ${ui.color}`}>
-                      {card.value}
-                    </span>
-                    <span className={`text-4xl self-center ${ui.color}`}>
-                      {ui.symbol}
-                    </span>
-                    <span
-                      className={`text-xl font-bold self-end rotate-180 ${ui.color}`}
-                    >
-                      {card.value}
-                    </span>
-
-                    {gameState === "DEALT" && isRecommended && (
-                      <div className='absolute -bottom-2 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 font-bold text-[10px] px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10'>
-                        💡 AI Pick
-                      </div>
-                    )}
-                  </div>
-
-                  {/* BACK OF THE CARD */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      backfaceVisibility: "hidden",
-                      WebkitBackfaceVisibility: "hidden",
-                      transform: "rotateY(0deg)",
-                    }}
-                    className='bg-gradient-to-br from-blue-900 to-slate-950 border-2 border-blue-500/40 rounded-xl flex items-center justify-center shadow-xl'
-                  >
-                    <div className='w-12 h-12 rounded-full border border-blue-400/20 flex items-center justify-center opacity-40'>
-                      <span className='text-xl text-blue-400'>♠</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {hand.length === 0 && (
-            <div className='col-span-5 flex items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-xl h-full py-16 text-sm italic'>
-              Select a bet size and click Deal Hand to start playing...
-            </div>
-          )}
-        </div>
-
-        {/* Coach Commentary Reveal Box */}
-        {gameState === "FINISHED" && coachCommentary && (
-          <div className='mb-6 p-5 bg-gradient-to-r from-slate-950 to-slate-900 border-l-4 border-teal-400 rounded-r-xl shadow-lg'>
-            <div className='flex items-start gap-4'>
-              <div className='flex flex-col items-center bg-slate-900 border border-slate-800 p-2 rounded-xl min-w-[60px]'>
-                <span className='text-2xl mb-1'>👑</span>
-                <span className='text-[10px] uppercase font-black tracking-wider text-teal-400'>
-                  AI COACH
-                </span>
-              </div>
-              <div className='flex-1'>
-                <h4 className='text-xs font-bold text-slate-400 uppercase tracking-widest mb-1'>
-                  Post-Game Analysis
-                </h4>
-                <p className='text-sm font-medium text-slate-100 italic leading-relaxed'>
-                  "{coachCommentary}"
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Dynamic Multiplier Payoff Banner */}
-        {payoutWon !== null && resultRank && (
-          <div
-            className={`mb-6 p-4 rounded-xl text-center border transition-all ${
-              payoutWon > 0
-                ? "bg-emerald-950/30 border-emerald-500/30 text-emerald-400"
-                : "bg-slate-950 border-slate-800 text-slate-400"
-            }`}
+            <span>Draw Replacements</span>
+            <span className='text-xs bg-black/10 px-2 py-0.5 rounded font-bold'>
+              ({5 - holds.length} New)
+            </span>
+            <span className='hidden sm:inline-block text-[10px] font-mono bg-black/20 text-slate-950 px-1.5 py-0.5 rounded ml-1'>
+              SPACE
+            </span>
+          </button>
+        ) : (
+          <button
+            type='button'
+            onClick={handleDeal}
+            className='w-full h-12 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-emerald-500/20 transition-transform flex items-center justify-center gap-2'
           >
-            <h3 className='text-2xl font-black uppercase tracking-wide'>
-              {resultRank}
+            <span>Deal Hand</span>
+            <span className='text-xs bg-black/10 px-2 py-0.5 rounded font-bold'>
+              ${bet}
+            </span>
+            <span className='hidden sm:inline-block text-[10px] font-mono bg-black/20 text-slate-950 px-1.5 py-0.5 rounded ml-1'>
+              SPACE
+            </span>
+          </button>
+        )}
+      </footer>
+
+      {/* Dialogs */}
+      <RulesModal
+        isOpen={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        currentBet={bet}
+      />
+
+      {showResetModal && (
+        <div
+          role='dialog'
+          aria-modal='true'
+          aria-labelledby='reset-title'
+          className='fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4'
+        >
+          <div className='bg-slate-900 border border-slate-800 rounded-2xl max-w-xs w-full p-5 text-center space-y-3 shadow-2xl'>
+            <h3 id='reset-title' className='text-base font-bold text-white'>
+              Reset Bankroll?
             </h3>
-            <p className='text-sm mt-1'>
-              {payoutWon > 0
-                ? `💰 Payout Received: +${payoutWon} Credits!`
-                : "❌ No payout combination completed."}
+            <p className='text-xs text-slate-400'>
+              Restores bankroll to{" "}
+              <span className='text-emerald-400 font-bold'>$1,000</span> and
+              clears session history.
             </p>
-          </div>
-        )}
-
-        {/* Dynamic Multiplier Payoff and Accuracy Dual Banner */}
-        {gameState === "FINISHED" && handAccuracy !== null && (
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-4 mb-6'>
-            {/* Hand Outcome Rank Card */}
-            <div
-              className={`p-4 rounded-xl text-center border bg-slate-950 border-slate-800`}
-            >
-              <h3 className='text-2xl font-black uppercase tracking-wide text-slate-100'>
-                {resultRank}
-              </h3>
-              <p className='text-sm mt-1 text-slate-400'>
-                {payoutWon && payoutWon > 0
-                  ? `💰 Payout Received: +${payoutWon} Credits!`
-                  : "❌ No payout combination completed."}
-              </p>
-            </div>
-
-            {/* NEW: Strategy Rating Card */}
-            <div className='p-4 rounded-xl border bg-slate-950 border-slate-800 flex flex-col justify-center'>
-              <div className='flex justify-between items-center mb-1.5 px-1'>
-                <span className='text-xs font-bold uppercase tracking-wider text-slate-400'>
-                  Decision Accuracy
-                </span>
-                <span
-                  className={`text-lg font-black ${
-                    handAccuracy === 100
-                      ? "text-emerald-400"
-                      : handAccuracy >= 60
-                        ? "text-amber-400"
-                        : "text-red-400"
-                  }`}
-                >
-                  {handAccuracy}%{" "}
-                  {handAccuracy === 100
-                    ? "🔥 Perfect"
-                    : handAccuracy >= 60
-                      ? "👍 OK"
-                      : "💀 Miss"}
-                </span>
-              </div>
-
-              {/* Visual Progress Bar Meter */}
-              <div className='w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-800'>
-                <div
-                  className={`h-full transition-all duration-500 rounded-full ${
-                    handAccuracy === 100
-                      ? "bg-gradient-to-r from-emerald-500 to-teal-400"
-                      : handAccuracy >= 60
-                        ? "bg-amber-500"
-                        : "bg-red-500"
-                  }`}
-                  style={{ width: `${handAccuracy}%` }}
-                />
-              </div>
+            <div className='grid grid-cols-2 gap-2 pt-1'>
+              <button
+                type='button'
+                onClick={() => setShowResetModal(false)}
+                className='py-2 text-xs font-semibold rounded-lg text-slate-300 bg-slate-800 hover:bg-slate-700'
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                onClick={handleReset}
+                className='py-2 text-xs font-bold rounded-lg text-slate-950 bg-emerald-500 hover:bg-emerald-400'
+              >
+                Confirm
+              </button>
             </div>
           </div>
-        )}
-
-        {/* Action Button Controls */}
-        <div className='flex justify-center gap-4'>
-          {gameState !== "DEALT" ? (
-            <button
-              onClick={handleDeal}
-              className='px-8 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black rounded-xl hover:opacity-90 active:scale-98 transition-all shadow-lg shadow-emerald-500/10'
-            >
-              DEAL NEW HAND (-${bet})
-            </button>
-          ) : (
-            <button
-              onClick={handleDraw}
-              className='px-8 py-3 bg-slate-100 text-slate-900 font-black rounded-xl hover:bg-white active:scale-98 transition-all shadow-xl'
-            >
-              DRAW REPLACEMENTS
-            </button>
-          )}
         </div>
-      </div>
-    </div>
+      )}
+    </main>
   );
 }

@@ -11,6 +11,9 @@ import {
   getOptimalHolds,
   getCoachCommentary,
 } from "./core/pokerEngine";
+import LegalModal from "./components/LegalModal";
+// Inside frontend/src/app/page.tsx
+import { trackEvent } from "./lib/analytics";
 
 const STORAGE_KEYS = {
   BANKROLL: "shp_bankroll",
@@ -74,6 +77,13 @@ export default function PokerGame() {
   // Inside component:
   const [deck, setDeck] = useState<Card[]>([]);
   const [optimalHolds, setOptimalHolds] = useState<number[]>([]);
+
+  // Add state:
+  const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
+
+    // 1. Session tracking ref inside the component
+  const sessionHandsRef = React.useRef<number>(0);
+  const sessionAccHistoryRef = React.useRef<number[]>([]);
 
   // 1. Initial State Hydration
   useEffect(() => {
@@ -226,6 +236,33 @@ export default function PokerGame() {
     setHandAccuracy(currentAcc);
     setAccuracyHistory((prev) => [...prev, currentAcc]);
     setGameState("FINISHED");
+
+    // --- ANALYTICS INSTRUMENTATION ---
+  sessionHandsRef.current += 1;
+  sessionAccHistoryRef.current.push(currentAcc);
+
+  const totalSessionHands = sessionHandsRef.current;
+  const rollingAvgAcc = Math.round(
+    sessionAccHistoryRef.current.reduce((a, b) => a + b, 0) / sessionAccHistoryRef.current.length
+  );
+
+  // Event A: Hand Completed
+  trackEvent("Hand Completed", {
+    rank: finalRank,
+    bet: bet,
+    payout: payout,
+    gto_accuracy: currentAcc,
+    is_optimal: isMatch,
+    persona: persona,
+  });
+
+  // Event B: Retention / Milestone Engagement
+  if ([10, 25, 50, 100, 250].includes(totalSessionHands)) {
+    trackEvent("Hand Milestone Reached", {
+      hands_played: totalSessionHands,
+      avg_accuracy: rollingAvgAcc,
+    });
+  }
   }, [gameState, hand, holds, deck, bet, optimalHolds, persona]);
 
   // Global Keyboard Shortcuts
@@ -254,6 +291,15 @@ export default function PokerGame() {
         if (gameState === "DEALT") handleDraw();
         else handleDeal();
       }
+
+      if (showRulesModal || showResetModal || showLegalModal) {
+        if (e.key === "Escape") {
+          setShowRulesModal(false);
+          setShowResetModal(false);
+          setShowLegalModal(false);
+        }
+        return;
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -279,6 +325,25 @@ export default function PokerGame() {
     localStorage.setItem(STORAGE_KEYS.BANKROLL, INITIAL_BANKROLL.toString());
     localStorage.removeItem(STORAGE_KEYS.ACCURACY_HISTORY);
   };
+
+  // 3. Track Session End / Retention on page unload
+useEffect(() => {
+  const handleBeforeUnload = () => {
+    if (sessionHandsRef.current > 0) {
+      const avg = Math.round(
+        sessionAccHistoryRef.current.reduce((a, b) => a + b, 0) /
+          sessionAccHistoryRef.current.length
+      );
+      trackEvent("Session Ended", {
+        total_hands: sessionHandsRef.current,
+        session_avg_accuracy: avg,
+      });
+    }
+  };
+
+  window.addEventListener("beforeunload", handleBeforeUnload);
+  return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+}, []);
 
   return (
     <main className='h-dvh h-screen w-full bg-slate-950 text-slate-100 flex flex-col justify-between overflow-hidden select-none touch-manipulation font-sans'>
@@ -535,7 +600,50 @@ export default function PokerGame() {
             </span>
           </button>
         )}
+        {/* Compact Disclaimer Bar (< 22px high, zero CLS) */}
+        <div className='flex items-center justify-between text-[10px] text-slate-500 px-1 pt-1 border-t border-slate-900'>
+          <div className='flex items-center gap-1.5 truncate'>
+            <span className='w-1.5 h-1.5 rounded-full bg-emerald-500/60 inline-block' />
+            <span className='truncate'>
+              100% Free Simulator &bull; No Real Money
+            </span>
+          </div>
+
+          <div className='flex items-center gap-2 shrink-0'>
+            <a
+              href='https://www.ncpgambling.org'
+              target='_blank'
+              rel='noopener noreferrer'
+              className='hover:text-slate-300 transition'
+            >
+              NCPG
+            </a>
+            <span>&bull;</span>
+            <a
+              href='https://www.begambleaware.org'
+              target='_blank'
+              rel='noopener noreferrer'
+              className='hover:text-slate-300 transition'
+            >
+              BeGambleAware
+            </a>
+            <span>&bull;</span>
+            <button
+              type='button'
+              onClick={() => setShowLegalModal(true)}
+              className='hover:text-emerald-400 font-medium underline transition'
+            >
+              Terms & Rules
+            </button>
+          </div>
+        </div>
       </footer>
+
+      {/* Mount LegalModal */}
+      <LegalModal
+        isOpen={showLegalModal}
+        onClose={() => setShowLegalModal(false)}
+      />
 
       {/* Dialogs */}
       <RulesModal

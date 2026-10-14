@@ -1,5 +1,6 @@
 // frontend/src/app/layout.tsx
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,6 +22,20 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      {/* Plausible Analytics (< 1KB, Cookie-free, Privacy-first) */}
+        <Script
+          defer
+          data-domain="smartholdpoker.com"
+          src="https://plausible.io/js/script.tagged-events.js"
+          strategy="afterInteractive"
+        />
+        {/* If using Umami instead, uncomment this:
+        <Script
+          defer
+          src="https://cloud.umami.is/script.js"
+          data-website-id="YOUR-UMAMI-WEBSITE-ID"
+          strategy="afterInteractive"
+        /> */}
       <body className="antialiased bg-slate-950 overflow-hidden">{children}</body>
     </html>
   );
